@@ -552,6 +552,18 @@ export default function CadastreMapCollecte({
                 const isRecensed = hasMatchingKey(recensedKeys, featureKeys);
                 const hasConvocation = hasMatchingKey(convocationKeys, featureKeys) && !isRecensed;
 
+                // Diagnostic : cliquez sur un lot dans la carte puis ouvrez F12 > Console.
+                // Vous verrez les propriétés GeoJSON, les clés calculées et le statut de correspondance.
+                layer.on('click', () => {
+                  console.group('Diagnostic lot GeoJSON');
+                  console.log('PROPRIÉTÉS DU LOT GEOJSON :', p);
+                  console.log('IDENTITÉ EXTRAITE :', getFeatureIdentity(p, commune));
+                  console.log('CLÉS DU LOT :', Array.from(featureKeys));
+                  console.log('CLÉS VALIDÉES DISPONIBLES :', Array.from(recensedKeys));
+                  console.log('LOT TROUVÉ COMME VALIDÉ :', isRecensed);
+                  console.groupEnd();
+                });
+
                 const sectionOrig = p.__section_orig || get('SECTION');
                 const parcelleOrig = p.__parcelle_orig || get('PARCELLE');
                 const lotOrig = p.__lot_orig || get('LOT');
