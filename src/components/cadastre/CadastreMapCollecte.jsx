@@ -204,79 +204,128 @@ export default function CadastreMapCollecte({
 
   useEffect(() => { parcelleOverridesRef.current = parcelleOverrides; }, [parcelleOverrides]);
 
-  // Réagir aux changements de sélection de sections
+  // Signature stable : évite de relancer le chargement à chaque rendu React.
+  const selectedSectionsKey = useMemo(
+    () => selectedSections
+      .map((section) => `${section.id}:${section.geojson_url || section.url || ''}`)
+      .sort()
+      .join('|'),
+    [selectedSections]
+  );
+
+  // Réagir aux changements réels de sélection de sections.
   useEffect(() => {
-    const selectedIds = new Set(selectedSections.map((s) => s.id));
+    let cancelled = false;
+    const selectedIds = new Set(selectedSections.map((section) => section.id));
 
-    // Retirer les sections désélectionnées de la carte (sans fetch)
-    setLoadedGeojsons((prev) => prev.filter((g) => selectedIds.has(g.sectionId)));
-
-    // Identifier les nouvelles sections à charger (pas encore en cache ni en cours)
-    const toLoad = selectedSections.filter(
-      (s) => !geojsonCacheRef.current[s.id] && !loadingIds.has(s.id)
-    );
-
-    // Réinjecter depuis le cache les sections déjà téléchargées mais retirées temporairement
-    const fromCache = selectedSections.filter(
-      (s) => geojsonCacheRef.current[s.id]
-    );
-
-    if (fromCache.length > 0) {
-      setLoadedGeojsons((prev) => {
-        const existingIds = new Set(prev.map((g) => g.sectionId));
-        const toAdd = fromCache
-          .filter((s) => !existingIds.has(s.id))
-          .map((s) => geojsonCacheRef.current[s.id]);
-        return toAdd.length > 0 ? [...prev, ...toAdd] : prev;
-      });
-    }
-
-    if (toLoad.length === 0) return;
-
-    // Marquer comme en cours de chargement
-    setLoadingIds((prev) => {
-      const next = new Set(prev);
-      toLoad.forEach((s) => next.add(s.id));
-      return next;
+    // Retirer uniquement les sections réellement désélectionnées.
+    setLoadedGeojsons((previous) => {
+      const next = previous.filter((item) => selectedIds.has(item.sectionId));
+      return next.length === previous.length ? previous : next;
     });
 
-    // Télécharger les GeoJSON manquants
-    const loadSections = async () => {
-      const results = await Promise.all(
-        toLoad.map(async (sec) => {
-          try {
-            const resp = await fetch(sec.geojson_url);
-            if (!resp.ok) return null;
-            const geojson = await resp.json();
-            if (!geojson?.features?.length) return null;
-            const entry = { sectionId: sec.id, nomSection: sec.nom_section, data: geojson };
-            geojsonCacheRef.current[sec.id] = entry; // Mise en cache session
-            return entry;
-          } catch (e) {
-            return null;
+    // Réinjecter immédiatement les sections déjà présentes dans le cache.
+    setLoadedGeojsons((previous) => {
+      const existingIds = new Set(previous.map((item) => item.sectionId));
+      const cachedToAdd = selectedSections
+        .filter((section) => !existingIds.has(section.id) && geojsonCacheRef.current[section.id])
+        .map((section) => geojsonCacheRef.current[section.id]);
+
+      return cachedToAdd.length ? [...previous, ...cachedToAdd] : previous;
+    });
+
+    const sectionsToLoad = selectedSections.filter(
+      (section) => !geojsonCacheRef.current[section.id]
+    );
+
+    if (!sectionsToLoad.length) {
+      setLoadingIds(new Set());
+      return () => { cancelled = true; };
+    }
+
+    setLoadingIds(new Set(sectionsToLoad.map((section) => section.id)));
+
+    async function loadGeoJson(section) {
+      const sourceUrl = section.geojson_url || section.url || section.file_url;
+      if (!sourceUrl) {
+        throw new Error(`URL GeoJSON absente pour la section ${section.nom_section || section.id}`);
+      }
+
+      // Les URL relatives sont résolues sur le domaine Render courant.
+      const resolvedUrl = new URL(sourceUrl, window.location.origin).toString();
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 30000);
+
+      try {
+        const response = await fetch(resolvedUrl, {
+          credentials: 'include',
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status} pour ${resolvedUrl}`);
+        }
+
+        const geojson = await response.json();
+        if (!geojson || !Array.isArray(geojson.features)) {
+          throw new Error('Le fichier reçu n’est pas un GeoJSON valide');
+        }
+
+        const entry = {
+          sectionId: section.id,
+          nomSection: section.nom_section || section.nom || `Section ${section.id}`,
+          data: geojson,
+        };
+
+        geojsonCacheRef.current[section.id] = entry;
+        return entry;
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
+    }
+
+    Promise.allSettled(sectionsToLoad.map(loadGeoJson))
+      .then((results) => {
+        if (cancelled) return;
+
+        const loaded = [];
+        const errors = [];
+
+        results.forEach((result, index) => {
+          if (result.status === 'fulfilled') {
+            loaded.push(result.value);
+          } else {
+            const section = sectionsToLoad[index];
+            errors.push(
+              `${section.nom_section || section.id}: ${result.reason?.message || 'chargement impossible'}`
+            );
           }
-        })
-      );
+        });
 
-      const valid = results.filter(Boolean);
+        if (loaded.length) {
+          setLoadedGeojsons((previous) => {
+            const existingIds = new Set(previous.map((item) => item.sectionId));
+            const additions = loaded.filter(
+              (item) => selectedIds.has(item.sectionId) && !existingIds.has(item.sectionId)
+            );
+            return additions.length ? [...previous, ...additions] : previous;
+          });
+        }
 
-      setLoadedGeojsons((prev) => {
-        // Ajouter uniquement les sections toujours sélectionnées
-        const currentSelected = new Set(selectedSections.map((s) => s.id));
-        const toAdd = valid.filter((g) => currentSelected.has(g.sectionId));
-        const existingIds = new Set(prev.map((g) => g.sectionId));
-        return [...prev, ...toAdd.filter((g) => !existingIds.has(g.sectionId))];
+        if (errors.length) {
+          console.error('Erreurs de chargement GeoJSON :', errors);
+          toast.error(`Carte non chargée : ${errors[0]}`, { duration: 10000 });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingIds(new Set());
       });
 
-      setLoadingIds((prev) => {
-        const next = new Set(prev);
-        toLoad.forEach((s) => next.delete(s.id));
-        return next;
-      });
+    return () => {
+      cancelled = true;
     };
-
-    loadSections();
-  }, [selectedSections]);
+  }, [selectedSectionsKey]);
 
   // Un lot devient vert uniquement si une collecte correspondante est validée.
   const recensedKeys = useMemo(() => {
