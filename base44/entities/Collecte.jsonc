@@ -1,0 +1,378 @@
+{
+  "name": "Collecte",
+  "type": "object",
+  "properties": {
+    "organisation_id": {
+      "type": "string",
+      "description": "ID de l'organisation propri\u00e9taire"
+    },
+    "reference_dgi": {
+      "type": "string",
+      "description": "R\u00e9f\u00e9rence DGI IN 99"
+    },
+    "statut": {
+      "type": "string",
+      "enum": [
+        "brouillon",
+        "complete",
+        "validee"
+      ],
+      "default": "brouillon"
+    },
+    "commune": {
+      "type": "string"
+    },
+    "section": {
+      "type": "string"
+    },
+    "parcelle": {
+      "type": "string"
+    },
+    "code_exemption": {
+      "type": "string"
+    },
+    "annee_acq": {
+      "type": "string"
+    },
+    "nature": {
+      "type": "string"
+    },
+    "surface_imposable": {
+      "type": "number"
+    },
+    "valeur_venale": {
+      "type": "number"
+    },
+    "code_vv": {
+      "type": "string"
+    },
+    "quartier": {
+      "type": "string"
+    },
+    "code_quartier": {
+      "type": "string"
+    },
+    "lot": {
+      "type": "string"
+    },
+    "ilot": {
+      "type": "string"
+    },
+    "tf": {
+      "type": "string"
+    },
+    "num_appartement": {
+      "type": "string"
+    },
+    "niveau_appartement": {
+      "type": "string"
+    },
+    "longitude": {
+      "type": "number",
+      "description": "Longitude WGS 84 (X)"
+    },
+    "latitude": {
+      "type": "number",
+      "description": "Latitude WGS 84 (Y)"
+    },
+    "type_proprietaire": {
+      "type": "string",
+      "enum": [
+        "particulier",
+        "societe"
+      ]
+    },
+    "prop_nom": {
+      "type": "string"
+    },
+    "prop_prenoms": {
+      "type": "string"
+    },
+    "prop_date_naissance": {
+      "type": "string",
+      "format": "date"
+    },
+    "prop_lieu_naissance": {
+      "type": "string"
+    },
+    "prop_sous_prefecture": {
+      "type": "string"
+    },
+    "prop_pays": {
+      "type": "string"
+    },
+    "prop_carte_identite": {
+      "type": "string"
+    },
+    "prop_photo_carte_identite_recto": {
+      "type": "string",
+      "description": "Photo du recto de la pi\u00e8ce d'identit\u00e9"
+    },
+    "prop_photo_carte_identite_verso": {
+      "type": "string",
+      "description": "Photo du verso de la pi\u00e8ce d'identit\u00e9"
+    },
+    "prop_nationalite": {
+      "type": "string"
+    },
+    "prop_autre_piece": {
+      "type": "string"
+    },
+    "prop_autre_piece_numero": {
+      "type": "string"
+    },
+    "prop_compte_contribuable": {
+      "type": "string"
+    },
+    "prop_nom_pere": {
+      "type": "string"
+    },
+    "prop_nom_mere": {
+      "type": "string"
+    },
+    "prop_adresse_postale": {
+      "type": "string"
+    },
+    "prop_bp": {
+      "type": "string"
+    },
+    "prop_ville": {
+      "type": "string"
+    },
+    "prop_quartier_residence": {
+      "type": "string"
+    },
+    "prop_tel": {
+      "type": "string"
+    },
+    "prop_adresse_tf": {
+      "type": "string"
+    },
+    "prop_infos_complementaires": {
+      "type": "string"
+    },
+    "prop_signature_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Date de signature du propri\u00e9taire"
+    },
+    "prop_signature": {
+      "type": "string",
+      "description": "Nom et pr\u00e9noms du propri\u00e9taire pour signature"
+    },
+    "prop_photo_signature": {
+      "type": "string",
+      "description": "Photo/image de la signature du propri\u00e9taire"
+    },
+    "situation_familiale": {
+      "type": "string",
+      "enum": [
+        "celibataire",
+        "marie",
+        "divorce",
+        "veuf"
+      ]
+    },
+    "nombre_enfants": {
+      "type": "number"
+    },
+    "prof_profession": {
+      "type": "string"
+    },
+    "prof_service_employeur": {
+      "type": "string"
+    },
+    "prof_adresse_postale": {
+      "type": "string"
+    },
+    "prof_bp": {
+      "type": "string"
+    },
+    "prof_ville": {
+      "type": "string"
+    },
+    "prof_quartier": {
+      "type": "string"
+    },
+    "prof_tel": {
+      "type": "string"
+    },
+    "societe_raison_sociale": {
+      "type": "string"
+    },
+    "societe_registre_commerce": {
+      "type": "string"
+    },
+    "societe_compte_contribuable": {
+      "type": "string"
+    },
+    "societe_adresse_postale": {
+      "type": "string"
+    },
+    "societe_bp": {
+      "type": "string"
+    },
+    "societe_ville": {
+      "type": "string"
+    },
+    "societe_quartier": {
+      "type": "string"
+    },
+    "societe_tel": {
+      "type": "string"
+    },
+    "societe_ilot": {
+      "type": "string"
+    },
+    "societe_lot": {
+      "type": "string"
+    },
+    "societe_tf": {
+      "type": "string"
+    },
+    "societe_signature_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Date de signature du repr\u00e9sentant de la soci\u00e9t\u00e9"
+    },
+    "societe_signature": {
+      "type": "string",
+      "description": "Nom et pr\u00e9noms du repr\u00e9sentant pour signature"
+    },
+    "societe_photo_signature": {
+      "type": "string",
+      "description": "Photo/image de la signature du repr\u00e9sentant de la soci\u00e9t\u00e9"
+    },
+    "bien_nature_local": {
+      "type": "string",
+      "enum": [
+        "immeuble_collectif",
+        "maison_individuelle",
+        "logement_cour_commune",
+        "local_commercial",
+        "local_industriel",
+        "local_artisanal",
+        "bureau",
+        "terrain_nu"
+      ]
+    },
+    "bien_equipe_eau": {
+      "type": "boolean"
+    },
+    "bien_equipe_electricite": {
+      "type": "boolean"
+    },
+    "bien_nombre_niveaux": {
+      "type": "number"
+    },
+    "bien_nombre_batiments": {
+      "type": "number"
+    },
+    "bien_annee_achevement": {
+      "type": "string"
+    },
+    "bien_nature_occupation": {
+      "type": "string",
+      "enum": [
+        "proprietaire",
+        "usine",
+        "local_commercial",
+        "local_professionnel",
+        "entrepot",
+        "habitation_louee",
+        "inoccupe"
+      ]
+    },
+    "bien_valeur_locative_mensuelle": {
+      "type": "number"
+    },
+    "bien_nombre_pieces": {
+      "type": "number"
+    },
+    "bien_photo_facade": {
+      "type": "string",
+      "description": "Photo de la fa\u00e7ade de l'immeuble"
+    },
+    "bien_photo_entree": {
+      "type": "string",
+      "description": "Photo de l'entr\u00e9e de l'immeuble"
+    },
+    "bien_photo_general": {
+      "type": "string",
+      "description": "Photo g\u00e9n\u00e9rale de l'immeuble"
+    },
+    "bien2_photo_facade": {
+      "type": "string",
+      "description": "Photo de la fa\u00e7ade du b\u00e2timent 2"
+    },
+    "bien2_photo_entree": {
+      "type": "string",
+      "description": "Photo de l'entr\u00e9e du b\u00e2timent 2"
+    },
+    "bien2_photo_general": {
+      "type": "string",
+      "description": "Photo g\u00e9n\u00e9rale du b\u00e2timent 2"
+    },
+    "tableau_synthese": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "annee_achevement": {
+            "type": "string"
+          },
+          "nature_occupation": {
+            "type": "string"
+          },
+          "valeur_locative_annuelle": {
+            "type": "number"
+          },
+          "nombre_pieces": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "gestion_par_agence": {
+      "type": "boolean"
+    },
+    "agence_raison_sociale": {
+      "type": "string"
+    },
+    "agence_compte_contribuable": {
+      "type": "string"
+    },
+    "agence_adresse_postale": {
+      "type": "string"
+    },
+    "agence_bp": {
+      "type": "string"
+    },
+    "agence_ville": {
+      "type": "string"
+    },
+    "agence_quartier": {
+      "type": "string"
+    },
+    "agence_tel": {
+      "type": "string"
+    },
+    "date_collecte": {
+      "type": "string",
+      "format": "date"
+    },
+    "signature_agent": {
+      "type": "string"
+    },
+    "signature_agent_photo": {
+      "type": "string",
+      "description": "Photo/image de la signature de l'agent recenseur"
+    }
+  },
+  "required": [
+    "commune",
+    "type_proprietaire",
+    "organisation_id"
+  ],
+  "rls": {}
+}

@@ -1,0 +1,34 @@
+{
+  "name": "User",
+  "type": "object",
+  "properties": {
+    "role": {
+      "type": "string",
+      "enum": [
+        "admin",
+        "superviseur",
+        "user"
+      ],
+      "default": "user"
+    },
+    "organisation_id": {
+      "type": "string",
+      "description": "ID de l'organisation de l'utilisateur"
+    },
+    "commune": {
+      "type": "string",
+      "description": "Commune affect\u00e9e \u00e0 l'utilisateur agent"
+    },
+    "communes_supervisees": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Liste des communes supervis\u00e9es (pour le r\u00f4le superviseur)"
+    }
+  },
+  "required": [
+    "organisation_id"
+  ]
+}

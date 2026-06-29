@@ -1,0 +1,53 @@
+{
+  "name": "ParcelleOverride",
+  "type": "object",
+  "properties": {
+    "organisation_id": {
+      "type": "string",
+      "description": "ID de l'organisation"
+    },
+    "commune": {
+      "type": "string",
+      "description": "Commune de la parcelle"
+    },
+    "section_original": {
+      "type": "string",
+      "description": "Section originale (pour identifier la parcelle)"
+    },
+    "parcelle_original": {
+      "type": "string",
+      "description": "Num\u00e9ro de parcelle original (pour identifier la parcelle)"
+    },
+    "lot_original": {
+      "type": "string",
+      "description": "Lot original (pour identifier la parcelle)"
+    },
+    "ilot_original": {
+      "type": "string",
+      "description": "\u00celot original (pour identifier la parcelle)"
+    },
+    "section": {
+      "type": "string"
+    },
+    "parcelle": {
+      "type": "string"
+    },
+    "quartier": {
+      "type": "string"
+    },
+    "lot": {
+      "type": "string"
+    },
+    "ilot": {
+      "type": "string"
+    },
+    "surface": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "organisation_id",
+    "commune",
+    "parcelle_original"
+  ]
+}
