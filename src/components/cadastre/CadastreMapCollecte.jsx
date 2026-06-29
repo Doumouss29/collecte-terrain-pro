@@ -246,40 +246,125 @@ export default function CadastreMapCollecte({
     setLoadingIds(new Set(sectionsToLoad.map((section) => section.id)));
 
     async function loadGeoJson(section) {
-      const sourceUrl = section.geojson_url || section.url || section.file_url;
+      const sourceUrl =
+        section.geojson_url ||
+        section.url ||
+        section.file_url;
+
       if (!sourceUrl) {
-        throw new Error(`URL GeoJSON absente pour la section ${section.nom_section || section.id}`);
+        throw new Error(
+          `URL GeoJSON absente pour la section ${
+            section.nom_section || section.id
+          }`
+        );
       }
 
-      // Les URL relatives sont résolues sur le domaine Render courant.
-      const resolvedUrl = new URL(sourceUrl, window.location.origin).toString();
+      console.log('Chargement GeoJSON :', {
+        section: section.nom_section || section.id,
+        url: sourceUrl,
+      });
+
       const controller = new AbortController();
-      const timeoutId = window.setTimeout(() => controller.abort(), 30000);
+      const timeoutId = window.setTimeout(
+        () => controller.abort(),
+        30000
+      );
 
       try {
-        const response = await fetch(resolvedUrl, {
-          credentials: 'include',
-          cache: 'no-store',
+        // Utilise directement l'URL enregistrée, comme dans la version
+        // qui fonctionnait avant la modification du chargement.
+        const response = await fetch(sourceUrl, {
           signal: controller.signal,
         });
 
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status} pour ${resolvedUrl}`);
+          throw new Error(
+            `HTTP ${response.status} pour ${sourceUrl}`
+          );
         }
 
-        const geojson = await response.json();
-        if (!geojson || !Array.isArray(geojson.features)) {
-          throw new Error('Le fichier reçu n’est pas un GeoJSON valide');
+        const contentType =
+          response.headers.get('content-type') || '';
+
+        const responseText = await response.text();
+
+        if (
+          contentType.includes('text/html') ||
+          responseText.trimStart().startsWith('<!doctype') ||
+          responseText.trimStart().startsWith('<html')
+        ) {
+          console.error(
+            'Le serveur a renvoyé du HTML au lieu du GeoJSON :',
+            {
+              section: section.nom_section || section.id,
+              url: sourceUrl,
+              aperçu: responseText.slice(0, 200),
+            }
+          );
+
+          throw new Error(
+            `Le fichier GeoJSON de ${
+              section.nom_section || section.id
+            } est introuvable à l’adresse ${sourceUrl}`
+          );
         }
+
+        let geojson;
+
+        try {
+          geojson = JSON.parse(responseText);
+        } catch {
+          console.error('Contenu GeoJSON invalide :', {
+            section: section.nom_section || section.id,
+            url: sourceUrl,
+            aperçu: responseText.slice(0, 200),
+          });
+
+          throw new Error(
+            `Le fichier reçu pour ${
+              section.nom_section || section.id
+            } n’est pas un JSON valide`
+          );
+        }
+
+        if (
+          !geojson ||
+          !Array.isArray(geojson.features)
+        ) {
+          throw new Error(
+            `Le fichier reçu pour ${
+              section.nom_section || section.id
+            } n’est pas un GeoJSON valide`
+          );
+        }
+
+        console.log('GeoJSON chargé avec succès :', {
+          section: section.nom_section || section.id,
+          url: sourceUrl,
+          nombreFeatures: geojson.features.length,
+        });
 
         const entry = {
           sectionId: section.id,
-          nomSection: section.nom_section || section.nom || `Section ${section.id}`,
+          nomSection:
+            section.nom_section ||
+            section.nom ||
+            `Section ${section.id}`,
           data: geojson,
         };
 
         geojsonCacheRef.current[section.id] = entry;
         return entry;
+      } catch (error) {
+        if (error.name === 'AbortError') {
+          throw new Error(
+            `Délai dépassé pendant le chargement de ${
+              section.nom_section || section.id
+            }`
+          );
+        }
+
+        throw error;
       } finally {
         window.clearTimeout(timeoutId);
       }
