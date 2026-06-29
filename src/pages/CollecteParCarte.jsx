@@ -131,12 +131,32 @@ export default function CollecteParCarte() {
     toast.success('Convocation enregistrée');
   };
 
-  const handleCollecteValidated = () => {
-    setValidatedParcelles(prev => [...prev, { ...selectedParcelle, collecteId: Date.now() }]);
-    queryClient.invalidateQueries({ queryKey: ['collectes-carte', effectiveOrganisationId, selectedCommune] });
-    queryClient.invalidateQueries({ queryKey: ['convocations-carte', effectiveOrganisationId] });
+  const handleCollecteValidated = async (savedCollecte) => {
+    const validatedParcel = {
+      ...selectedParcelle,
+      ...(savedCollecte || {}),
+      statut: 'validee',
+      collecteId: savedCollecte?.id || Date.now(),
+    };
+
+    // Le lot devient vert immédiatement, sans attendre le serveur.
+    setValidatedParcelles((previous) => [...previous, validatedParcel]);
+
     setIsFormOpen(false);
     setSelectedParcelle(null);
+
+    // Recharge ensuite les données PostgreSQL pour conserver l'état après actualisation.
+    await queryClient.invalidateQueries({
+      queryKey: ['collectes-carte', effectiveOrganisationId, selectedCommune],
+    });
+    await queryClient.refetchQueries({
+      queryKey: ['collectes-carte', effectiveOrganisationId, selectedCommune],
+    });
+
+    await queryClient.invalidateQueries({
+      queryKey: ['convocations-carte', effectiveOrganisationId],
+    });
+
     toast.success('Recensement enregistré !');
   };
 

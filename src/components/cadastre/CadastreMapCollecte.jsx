@@ -81,38 +81,79 @@ function UserLocation() {
 }
 
 function normalizeKeyPart(value) {
-  return normalizeText(value).replace(/\s+/g, '');
+  const normalized = normalizeText(value)
+    .replace(/[\s._\/-]+/g, '');
+
+  // 001, 01 et 1 deviennent la même valeur.
+  if (/^\d+$/.test(normalized)) {
+    return String(Number(normalized));
+  }
+
+  return normalized;
 }
 
-function getParcelField(props, key) {
-  const k = Object.keys(props || {}).find((item) => item.toUpperCase() === key.toUpperCase());
-  return k ? props[k] || '' : '';
+function getParcelField(props, ...aliases) {
+  const entries = Object.entries(props || {});
+
+  for (const alias of aliases) {
+    const normalizedAlias = normalizeKeyPart(alias);
+    const found = entries.find(([key]) => normalizeKeyPart(key) === normalizedAlias);
+    if (found) return found[1] ?? '';
+  }
+
+  return '';
 }
 
 function buildParcelKey(parts) {
-  return parts.map(normalizeKeyPart).join('_');
+  return parts.map(normalizeKeyPart).join('|');
 }
 
-function getParcelleKey(props) {
-  return buildParcelKey([
-    getParcelField(props, 'SECTION'),
-    getParcelField(props, 'PARCELLE'),
-    getParcelField(props, 'LOT'),
-    getParcelField(props, 'ILOT')
-  ]);
+function getFeatureIdentity(props, fallbackCommune = '') {
+  return {
+    commune: getParcelField(props, 'COMMUNE', 'COMMUNES', 'NOM_COMMUNE') || fallbackCommune,
+    quartier: getParcelField(props, 'QUARTIER', 'NOM_QUARTIER', 'VILLAGE'),
+    section: getParcelField(props, 'SECTION', 'NUM_SECTION', 'NO_SECTION'),
+    parcelle: getParcelField(props, 'PARCELLE', 'NUM_PARCELLE', 'NO_PARCELLE'),
+    lot: getParcelField(props, 'LOT', 'NUM_LOT', 'NUMERO_LOT', 'NO_LOT'),
+    ilot: getParcelField(props, 'ILOT', 'ÎLOT', 'NUM_ILOT', 'NUMERO_ILOT', 'NO_ILOT'),
+  };
 }
 
-function getLotIlotKeyFromValues({ lot, ilot, quartier }) {
-  if (!lot && !ilot) return '';
-  return buildParcelKey([lot || '', ilot || '', quartier || '']);
+function getValidatedKeysFromValues(values = {}) {
+  const keys = new Set();
+
+  const commune = values.commune || '';
+  const quartier = values.quartier || '';
+  const section = values.section || '';
+  const parcelle = values.parcelle || '';
+  const lot = values.lot || '';
+  const ilot = values.ilot || '';
+
+  // Clé complète lorsque section/parcelle sont disponibles.
+  if (section || parcelle) {
+    keys.add(`FULL:${buildParcelKey([commune, section, parcelle, lot, ilot])}`);
+    keys.add(`SP:${buildParcelKey([section, parcelle, lot, ilot])}`);
+  }
+
+  // Clé métier adaptée aux collectes PostgreSQL actuelles.
+  if (lot || ilot) {
+    keys.add(`CQLI:${buildParcelKey([commune, quartier, lot, ilot])}`);
+    keys.add(`QLI:${buildParcelKey([quartier, lot, ilot])}`);
+    keys.add(`LI:${buildParcelKey([lot, ilot])}`);
+  }
+
+  return keys;
 }
 
-function getLotIlotKey(props) {
-  return getLotIlotKeyFromValues({
-    lot: getParcelField(props, 'LOT'),
-    ilot: getParcelField(props, 'ILOT'),
-    quartier: getParcelField(props, 'QUARTIER'),
-  });
+function getFeatureValidatedKeys(props, fallbackCommune = '') {
+  return getValidatedKeysFromValues(getFeatureIdentity(props, fallbackCommune));
+}
+
+function hasMatchingKey(referenceKeys, candidateKeys) {
+  for (const key of candidateKeys) {
+    if (referenceKeys.has(key)) return true;
+  }
+  return false;
 }
 
 export default function CadastreMapCollecte({
@@ -237,31 +278,54 @@ export default function CadastreMapCollecte({
     loadSections();
   }, [selectedSections]);
 
-  // Construire un Set des parcelles déjà recensées
+  // Un lot devient vert uniquement si une collecte correspondante est validée.
   const recensedKeys = useMemo(() => {
     const keys = new Set();
-    collectesExistantes.forEach((c) => {
-      if (c.section || c.parcelle) keys.add(buildParcelKey([c.section, c.parcelle, c.lot, c.ilot]));
-      const lotIlotKey = getLotIlotKeyFromValues({ lot: c.lot, ilot: c.ilot, quartier: c.quartier });
-      if (lotIlotKey) keys.add(lotIlotKey);
+
+    collectesExistantes
+      .filter((collecte) => normalizeKeyPart(collecte.statut) === 'VALIDEE')
+      .forEach((collecte) => {
+        getValidatedKeysFromValues({
+          commune: collecte.commune || commune,
+          quartier: collecte.quartier,
+          section: collecte.section,
+          parcelle: collecte.parcelle,
+          lot: collecte.lot,
+          ilot: collecte.ilot,
+        }).forEach((key) => keys.add(key));
+      });
+
+    // Mise à jour visuelle immédiate après validation, avant même le refetch.
+    validatedParcelles.forEach((parcelle) => {
+      getValidatedKeysFromValues({
+        commune: parcelle.commune || commune,
+        quartier: parcelle.quartier,
+        section: parcelle.section,
+        parcelle: parcelle.parcelle,
+        lot: parcelle.lot,
+        ilot: parcelle.ilot,
+      }).forEach((key) => keys.add(key));
     });
-    validatedParcelles.forEach((p) => {
-      if (p.section || p.parcelle) keys.add(buildParcelKey([p.section, p.parcelle, p.lot, p.ilot]));
-      const lotIlotKey = getLotIlotKeyFromValues({ lot: p.lot, ilot: p.ilot, quartier: p.quartier });
-      if (lotIlotKey) keys.add(lotIlotKey);
-    });
+
     return keys;
-  }, [collectesExistantes, validatedParcelles]);
+  }, [collectesExistantes, validatedParcelles, commune]);
 
   const convocationKeys = useMemo(() => {
     const keys = new Set();
-    convocations.forEach((c) => {
-      if (c.section || c.parcelle) keys.add(buildParcelKey([c.section, c.parcelle, c.lot, c.ilot]));
-      const lotIlotKey = getLotIlotKeyFromValues({ lot: c.lot, ilot: c.ilot, quartier: c.quartier });
-      if (lotIlotKey) keys.add(lotIlotKey);
+
+    convocations.forEach((convocation) => {
+      getValidatedKeysFromValues({
+        commune: convocation.commune || commune,
+        quartier: convocation.quartier,
+        section: convocation.section,
+        parcelle: convocation.parcelle,
+        lot: convocation.lot,
+        ilot: convocation.ilot,
+      }).forEach((key) => keys.add(key));
     });
+
     return keys;
-  }, [convocations]);
+  }, [convocations, commune]);
 
   // Appliquer les overrides sur les GeoJSON chargés
   const geojsonsWithOverrides = useMemo(() => {
@@ -419,10 +483,9 @@ export default function CadastreMapCollecte({
               data={data}
               style={(feature) => {
                 const props = feature.properties || {};
-                const key = getParcelleKey(props);
-                const lotIlotKey = getLotIlotKey(props);
-                const isRecensed = recensedKeys.has(key) || (lotIlotKey && recensedKeys.has(lotIlotKey));
-                const hasConvocation = (convocationKeys.has(key) || (lotIlotKey && convocationKeys.has(lotIlotKey))) && !isRecensed;
+                const featureKeys = getFeatureValidatedKeys(props, commune);
+                const isRecensed = hasMatchingKey(recensedKeys, featureKeys);
+                const hasConvocation = hasMatchingKey(convocationKeys, featureKeys) && !isRecensed;
                 return {
                   color: isRecensed ? '#16a34a' : hasConvocation ? '#64748b' : color,
                   weight: isRecensed || hasConvocation ? 2 : 1.5,
@@ -436,10 +499,9 @@ export default function CadastreMapCollecte({
                   const k = Object.keys(p).find((k) => k.toUpperCase() === key.toUpperCase());
                   return k ? p[k] || '' : '';
                 };
-                const key = getParcelleKey(p);
-                const lotIlotKey = getLotIlotKey(p);
-                const isRecensed = recensedKeys.has(key) || (lotIlotKey && recensedKeys.has(lotIlotKey));
-                const hasConvocation = (convocationKeys.has(key) || (lotIlotKey && convocationKeys.has(lotIlotKey))) && !isRecensed;
+                const featureKeys = getFeatureValidatedKeys(p, commune);
+                const isRecensed = hasMatchingKey(recensedKeys, featureKeys);
+                const hasConvocation = hasMatchingKey(convocationKeys, featureKeys) && !isRecensed;
 
                 const sectionOrig = p.__section_orig || get('SECTION');
                 const parcelleOrig = p.__parcelle_orig || get('PARCELLE');
