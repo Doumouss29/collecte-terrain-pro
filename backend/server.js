@@ -36,10 +36,42 @@ const pool = new pg.Pool({
   idleTimeoutMillis: 30000,
 });
 
+const allowedOrigins = String(
+  process.env.CORS_ORIGIN ||
+  process.env.APP_URL ||
+  process.env.PUBLIC_BASE_URL ||
+  ''
+)
+  .split(',')
+  .map((origin) => origin.trim().replace(/\/+$/, ''))
+  .filter(Boolean);
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || true,
+  origin(origin, callback) {
+    // Autorise les requêtes sans en-tête Origin : curl, outils serveur, navigation directe.
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    const normalizedOrigin = origin.replace(/\/+$/, '');
+
+    if (allowedOrigins.length === 0 || allowedOrigins.includes(normalizedOrigin)) {
+      return callback(null, true);
+    }
+
+    console.error('Origine CORS refusée :', normalizedOrigin);
+    return callback(
+      new Error(`Origine non autorisée par CORS : ${normalizedOrigin}`)
+    );
+  },
   credentials: true,
+  methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Content-Length', 'Content-Type'],
+  maxAge: 86400,
 }));
+
+app.options('*', cors());
 app.use(express.json({ limit: '35mb' }));
 app.use(cookieParser());
 app.use('/uploads', express.static(uploadDir));
