@@ -1,0 +1,33 @@
+{
+  "name": "CadastreCommunal",
+  "type": "object",
+  "properties": {
+    "organisation_id": {
+      "type": "string",
+      "description": "ID de l'organisation propri\u00e9taire"
+    },
+    "commune": {
+      "type": "string",
+      "description": "Nom de la commune (en majuscules)"
+    },
+    "nom_section": {
+      "type": "string",
+      "description": "Nom ou code de la section cadastrale"
+    },
+    "nombre_parcelles": {
+      "type": "number",
+      "description": "Nombre de parcelles dans ce fichier"
+    },
+    "geojson_url": {
+      "type": "string",
+      "description": "URL du fichier GeoJSON stock\u00e9"
+    }
+  },
+  "required": [
+    "organisation_id",
+    "commune",
+    "nom_section",
+    "geojson_url"
+  ],
+  "rls": {}
+}

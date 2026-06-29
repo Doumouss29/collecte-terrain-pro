@@ -1,0 +1,120 @@
+{
+  "name": "ConvocationParcelle",
+  "type": "object",
+  "properties": {
+    "organisation_id": {
+      "type": "string",
+      "description": "ID de l'organisation propri\u00e9taire"
+    },
+    "commune": {
+      "type": "string",
+      "description": "Commune de la parcelle"
+    },
+    "section": {
+      "type": "string",
+      "description": "Section cadastrale"
+    },
+    "parcelle": {
+      "type": "string",
+      "description": "Num\u00e9ro de parcelle"
+    },
+    "lot": {
+      "type": "string",
+      "description": "Lot"
+    },
+    "ilot": {
+      "type": "string",
+      "description": "\u00celot"
+    },
+    "quartier": {
+      "type": "string",
+      "description": "Quartier"
+    },
+    "coordX": {
+      "type": "string",
+      "description": "Coordonn\u00e9e X de la parcelle"
+    },
+    "coordY": {
+      "type": "string",
+      "description": "Coordonn\u00e9e Y de la parcelle"
+    },
+    "surface": {
+      "type": "number",
+      "description": "Superficie de la parcelle"
+    },
+    "statut": {
+      "type": "string",
+      "enum": [
+        "active",
+        "recensee"
+      ],
+      "default": "active",
+      "description": "Statut de la convocation"
+    }
+  },
+  "required": [
+    "organisation_id",
+    "commune",
+    "section",
+    "parcelle"
+  ],
+  "rls": {
+    "create": {
+      "data.organisation_id": "{{user.organisation_id}}"
+    },
+    "read": {
+      "$or": [
+        {
+          "data.organisation_id": "{{user.organisation_id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "$and": [
+            {
+              "user_condition": {
+                "role": "superviseur"
+              }
+            },
+            {
+              "$or": [
+                {
+                  "data.commune": {
+                    "$in": "{{user.communes_supervisees}}"
+                  }
+                },
+                {
+                  "user_condition": {
+                    "communes_supervisees": {
+                      "$size": 0
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "data.organisation_id": "{{user.organisation_id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}
