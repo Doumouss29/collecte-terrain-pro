@@ -63,7 +63,15 @@ export const base44 = {
     redirectToLogin: () => { window.location.href = '/'; },
   },
   users: {
-    inviteUser: (email, role = 'user') => request('/api/users/invite', { method: 'POST', body: { email, role } }),
+    inviteUser: (email, role = 'user', organisationId = null) =>
+      request('/api/users/invite', {
+        method: 'POST',
+        body: {
+          email,
+          role,
+          organisation_id: organisationId,
+        },
+      }),
   },
   integrations: {
     Core: {

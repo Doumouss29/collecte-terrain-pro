@@ -101,22 +101,33 @@ export default function AdminOrganisations() {
   });
 
   const inviteUserMutation = useMutation({
-    mutationFn: async ({ email, organisation_id }) => {
-      await base44.users.inviteUser(email, 'user');
-      // Créer une invitation en attente
-      await base44.entities.Invitation.create({
-        email,
-        organisation_id,
-        statut: 'en_attente'
-      });
+    mutationFn: async ({ email, organisation_id, role }) => {
+      return base44.users.inviteUser(email, role, organisation_id);
     },
-    onSuccess: () => {
+    onSuccess: async (result) => {
       queryClient.invalidateQueries({ queryKey: ['invitations'] });
       setMemberEmail('');
-      toast.success('Invitation envoyée avec succès');
+
+      const invitationUrl = result?.invitation_url;
+      if (invitationUrl) {
+        try {
+          await navigator.clipboard.writeText(invitationUrl);
+          toast.success(
+            "Invitation créée. Le lien a été copié : envoyez-le par email, WhatsApp ou SMS.",
+            { duration: 9000 }
+          );
+        } catch {
+          window.prompt(
+            "Invitation créée. Copiez ce lien et envoyez-le à l'utilisateur :",
+            invitationUrl
+          );
+        }
+      } else {
+        toast.success('Invitation créée');
+      }
     },
     onError: (error) => {
-      toast.error('Erreur lors de l\'invitation');
+      toast.error(error?.message || "Erreur lors de l'invitation");
     }
   });
 
@@ -189,7 +200,11 @@ export default function AdminOrganisations() {
       }
       await reassignCollectesMutation.mutateAsync({ userEmail: existingUser.email, organisationId: selectedOrg.id });
     } else {
-      inviteUserMutation.mutate({ email: memberEmail, organisation_id: selectedOrg.id });
+      inviteUserMutation.mutate({
+        email: memberEmail,
+        organisation_id: selectedOrg.id,
+        role: memberRole
+      });
     }
     setMemberRole('user');
   };

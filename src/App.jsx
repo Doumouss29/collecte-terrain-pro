@@ -7,8 +7,8 @@ import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
 import { Suspense, lazy } from 'react';
 import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
-import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import Login from '@/pages/Login';
+import AcceptInvitation from '@/pages/AcceptInvitation';
 
 const DashboardSuperviseur = lazy(() => import('./pages/DashboardSuperviseur'));
 const CollecteParCarte = lazy(() => import('./pages/CollecteParCarte'));
@@ -31,6 +31,12 @@ const LayoutWrapper = ({ children, currentPageName }) => Layout ?
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isAuthenticated, login } = useAuth();
 
+  // Cette page doit rester publique car l'utilisateur invité
+  // ne possède pas encore de compte ni de session.
+  if (window.location.pathname === '/accept-invitation') {
+    return <AcceptInvitation />;
+  }
+
   if (isLoadingAuth) return <PageLoader />;
   if (!isAuthenticated) return <Login onSuccess={login} />;
 
@@ -48,9 +54,7 @@ const AuthenticatedApp = () => {
   );
 };
 
-
 function App() {
-
   return (
     <AuthProvider>
       <QueryClientProvider client={queryClientInstance}>

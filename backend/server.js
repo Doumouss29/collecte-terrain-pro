@@ -4,6 +4,7 @@ import cors from 'cors';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import pg from 'pg';
 import PDFDocument from 'pdfkit';
@@ -35,7 +36,10 @@ const pool = new pg.Pool({
   idleTimeoutMillis: 30000,
 });
 
-app.use(cors({ origin: process.env.CORS_ORIGIN || true, credentials: true }));
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || true,
+  credentials: true,
+}));
 app.use(express.json({ limit: '35mb' }));
 app.use(cookieParser());
 app.use('/uploads', express.static(uploadDir));
@@ -91,6 +95,7 @@ function applySort(records, sort) {
 const AUTH_COOKIE = 'lm_session';
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-secret-in-production';
 const COOKIE_SECURE = process.env.NODE_ENV === 'production';
+const INVITATION_TTL_DAYS = Number(process.env.INVITATION_TTL_DAYS || 7);
 
 function publicUser(row) {
   return {
@@ -131,7 +136,7 @@ async function ensureAuthSchema() {
 async function syncBase44User(user) {
   const data = publicUser(user);
   const existing = await pool.query(
-    "SELECT id FROM base44_records WHERE entity='User' AND data->>'email'=$1 LIMIT 1",
+    "SELECT id FROM base44_records WHERE entity='User' AND lower(data->>'email')=lower($1) LIMIT 1",
     [user.email]
   );
   if (existing.rows.length) {
@@ -148,21 +153,35 @@ async function syncBase44User(user) {
 }
 
 async function ensureInitialAdmin() {
-  const email = (process.env.ADMIN_EMAIL || process.env.DEV_USER_EMAIL || 'admin@local.test').toLowerCase();
+  const email = (
+    process.env.ADMIN_EMAIL ||
+    process.env.DEV_USER_EMAIL ||
+    'admin@local.test'
+  ).toLowerCase();
+
   const password = process.env.ADMIN_PASSWORD;
   if (!password) {
     console.warn('ADMIN_PASSWORD non défini : aucun compte initial ne sera créé automatiquement.');
     return;
   }
-  const found = await pool.query('SELECT * FROM app_users WHERE lower(email)=lower($1) LIMIT 1', [email]);
+
+  const found = await pool.query(
+    'SELECT * FROM app_users WHERE lower(email)=lower($1) LIMIT 1',
+    [email]
+  );
+
   if (found.rows.length) {
     await syncBase44User(found.rows[0]);
     return;
   }
+
   const passwordHash = await bcrypt.hash(password, 12);
   const created = await pool.query(
-    `INSERT INTO app_users(email,password_hash,full_name,first_name,last_name,role,status)
-     VALUES($1,$2,$3,$4,$5,$6,'actif') RETURNING *`,
+    `INSERT INTO app_users(
+      email,password_hash,full_name,first_name,last_name,role,status
+    )
+    VALUES($1,$2,$3,$4,$5,$6,'actif')
+    RETURNING *`,
     [
       email,
       passwordHash,
@@ -172,12 +191,17 @@ async function ensureInitialAdmin() {
       process.env.ADMIN_ROLE || process.env.DEV_USER_ROLE || 'admin',
     ]
   );
+
   await syncBase44User(created.rows[0]);
   console.log(`Compte administrateur initial créé : ${email}`);
 }
 
 function createSessionToken(user) {
-  return jwt.sign({ sub: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+  return jwt.sign(
+    { sub: user.id, email: user.email, role: user.role },
+    JWT_SECRET,
+    { expiresIn: '7d' }
+  );
 }
 
 function setSessionCookie(res, token) {
@@ -193,15 +217,44 @@ function setSessionCookie(res, token) {
 async function requireAuth(req, res, next) {
   try {
     const token = req.cookies?.[AUTH_COOKIE];
-    if (!token) return res.status(401).json({ error: 'Authentication required' });
+    if (!token) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
     const payload = jwt.verify(token, JWT_SECRET);
-    const result = await pool.query('SELECT * FROM app_users WHERE id=$1 AND status=$2 LIMIT 1', [payload.sub, 'actif']);
-    if (!result.rows.length) return res.status(401).json({ error: 'Session invalide' });
+    const result = await pool.query(
+      'SELECT * FROM app_users WHERE id=$1 AND status=$2 LIMIT 1',
+      [payload.sub, 'actif']
+    );
+
+    if (!result.rows.length) {
+      return res.status(401).json({ error: 'Session invalide' });
+    }
+
     req.user = result.rows[0];
     next();
   } catch (_error) {
     res.status(401).json({ error: 'Session expirée ou invalide' });
   }
+}
+
+function requireAdmin(req, res, next) {
+  if (!req.user || !['admin', 'super_admin'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Droits administrateur requis' });
+  }
+  next();
+}
+
+function tokenHash(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function publicAppUrl() {
+  return (
+    process.env.APP_URL ||
+    process.env.PUBLIC_BASE_URL ||
+    `http://localhost:${PORT}`
+  ).replace(/\/+$/, '');
 }
 
 async function createCollectePdf(collecteId) {
@@ -236,6 +289,7 @@ async function createCollectePdf(collecteId) {
     ['Propriétaire', [collecte.prop_nom, collecte.prop_prenoms].filter(Boolean).join(' ')],
     ['Téléphone', collecte.prop_tel],
   ];
+
   doc.fontSize(11);
   for (const [label, value] of fields) {
     if (value !== undefined && value !== null && value !== '') {
@@ -243,6 +297,7 @@ async function createCollectePdf(collecteId) {
       doc.font('Helvetica').text(` ${String(value)}`);
     }
   }
+
   doc.moveDown();
   doc.fontSize(8).fillColor('gray').text('Document généré par Collecte Terrain Pro.');
   doc.end();
@@ -254,30 +309,56 @@ app.get('/health', async (_req, res) => {
     await pool.query('SELECT 1');
     res.json({ ok: true, database: 'connected' });
   } catch (error) {
-    res.status(500).json({ ok: false, database: 'error', error: error.message });
+    res.status(500).json({
+      ok: false,
+      database: 'error',
+      error: error.message,
+    });
   }
 });
 
 app.get('/api/apps/public/prod/public-settings/by-id/:appId', (req, res) => {
-  res.json({ id: req.params.appId || 'local', public_settings: { requiresAuth: false } });
+  res.json({
+    id: req.params.appId || 'local',
+    public_settings: { requiresAuth: true },
+  });
 });
+
+/* ------------------------- AUTHENTIFICATION ------------------------- */
 
 app.post('/api/auth/login', async (req, res, next) => {
   try {
     const email = String(req.body?.email || '').trim().toLowerCase();
     const password = String(req.body?.password || '');
-    if (!email || !password) return res.status(400).json({ error: 'Email et mot de passe obligatoires' });
-    const result = await pool.query('SELECT * FROM app_users WHERE lower(email)=lower($1) LIMIT 1', [email]);
+
+    if (!email || !password) {
+      return res.status(400).json({
+        error: 'Email et mot de passe obligatoires',
+      });
+    }
+
+    const result = await pool.query(
+      'SELECT * FROM app_users WHERE lower(email)=lower($1) LIMIT 1',
+      [email]
+    );
+
     if (!result.rows.length || result.rows[0].status !== 'actif') {
       return res.status(401).json({ error: 'Identifiants incorrects' });
     }
+
     const user = result.rows[0];
     const valid = await bcrypt.compare(password, user.password_hash);
-    if (!valid) return res.status(401).json({ error: 'Identifiants incorrects' });
+
+    if (!valid) {
+      return res.status(401).json({ error: 'Identifiants incorrects' });
+    }
+
     setSessionCookie(res, createSessionToken(user));
     await syncBase44User(user);
     res.json(publicUser(user));
-  } catch (error) { next(error); }
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get('/api/auth/me', requireAuth, async (req, res) => {
@@ -286,109 +367,480 @@ app.get('/api/auth/me', requireAuth, async (req, res) => {
 
 app.patch('/api/auth/me', requireAuth, async (req, res, next) => {
   try {
-    const allowed = ['full_name', 'first_name', 'last_name', 'organisation_id', 'communes_supervisees'];
-    const values = Object.fromEntries(Object.entries(req.body || {}).filter(([key]) => allowed.includes(key)));
+    const allowed = [
+      'full_name',
+      'first_name',
+      'last_name',
+      'organisation_id',
+      'communes_supervisees',
+    ];
+
+    const values = Object.fromEntries(
+      Object.entries(req.body || {}).filter(([key]) => allowed.includes(key))
+    );
+
     const result = await pool.query(
       `UPDATE app_users SET
-       full_name=COALESCE($1,full_name), first_name=COALESCE($2,first_name),
-       last_name=COALESCE($3,last_name), organisation_id=COALESCE($4,organisation_id),
-       communes_supervisees=COALESCE($5::jsonb,communes_supervisees), updated_at=now()
-       WHERE id=$6 RETURNING *`,
-      [values.full_name, values.first_name, values.last_name, values.organisation_id,
-       values.communes_supervisees ? JSON.stringify(values.communes_supervisees) : null, req.user.id]
+       full_name=COALESCE($1,full_name),
+       first_name=COALESCE($2,first_name),
+       last_name=COALESCE($3,last_name),
+       organisation_id=COALESCE($4,organisation_id),
+       communes_supervisees=COALESCE($5::jsonb,communes_supervisees),
+       updated_at=now()
+       WHERE id=$6
+       RETURNING *`,
+      [
+        values.full_name,
+        values.first_name,
+        values.last_name,
+        values.organisation_id,
+        values.communes_supervisees
+          ? JSON.stringify(values.communes_supervisees)
+          : null,
+        req.user.id,
+      ]
     );
+
     await syncBase44User(result.rows[0]);
     res.json(publicUser(result.rows[0]));
-  } catch (error) { next(error); }
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post('/api/auth/logout', (_req, res) => {
-  res.clearCookie(AUTH_COOKIE, { httpOnly: true, secure: COOKIE_SECURE, sameSite: 'lax', path: '/' });
+  res.clearCookie(AUTH_COOKIE, {
+    httpOnly: true,
+    secure: COOKIE_SECURE,
+    sameSite: 'lax',
+    path: '/',
+  });
   res.json({ ok: true });
 });
+
 app.post('/api/app-logs', (_req, res) => res.json({ ok: true }));
+
+/* ------------------------- INVITATIONS ------------------------- */
+
+app.post(
+  '/api/users/invite',
+  requireAuth,
+  requireAdmin,
+  async (req, res, next) => {
+    try {
+      const normalizedEmail = String(req.body?.email || '')
+        .trim()
+        .toLowerCase();
+
+      const role = String(req.body?.role || 'agent');
+      const organisationId =
+        req.body?.organisation_id ||
+        req.body?.organisationId ||
+        null;
+
+      if (!normalizedEmail) {
+        return res.status(400).json({ error: 'Email obligatoire' });
+      }
+
+      const existingUser = await pool.query(
+        'SELECT id FROM app_users WHERE lower(email)=lower($1) LIMIT 1',
+        [normalizedEmail]
+      );
+
+      if (existingUser.rows.length) {
+        return res.status(409).json({
+          error: 'Un utilisateur existe déjà avec cette adresse email',
+        });
+      }
+
+      const rawToken = crypto.randomBytes(32).toString('hex');
+      const hashedToken = tokenHash(rawToken);
+      const expiresAt = new Date(
+        Date.now() + INVITATION_TTL_DAYS * 24 * 60 * 60 * 1000
+      ).toISOString();
+
+      const invitationData = {
+        email: normalizedEmail,
+        role,
+        organisation_id: organisationId,
+        token_hash: hashedToken,
+        status: 'pending',
+        statut: 'en_attente',
+        expires_at: expiresAt,
+        invited_by: req.user.email,
+      };
+
+      const existingInvitation = await pool.query(
+        `SELECT id
+         FROM base44_records
+         WHERE entity='Invitation'
+           AND lower(data->>'email')=lower($1)
+           AND data->>'status'='pending'
+         LIMIT 1`,
+        [normalizedEmail]
+      );
+
+      let invitationRow;
+      if (existingInvitation.rows.length) {
+        const updated = await pool.query(
+          `UPDATE base44_records
+           SET data=$1::jsonb, updated_date=now()
+           WHERE id=$2
+           RETURNING *`,
+          [
+            JSON.stringify(invitationData),
+            existingInvitation.rows[0].id,
+          ]
+        );
+        invitationRow = updated.rows[0];
+      } else {
+        const created = await pool.query(
+          `INSERT INTO base44_records(entity, data)
+           VALUES('Invitation', $1::jsonb)
+           RETURNING *`,
+          [JSON.stringify(invitationData)]
+        );
+        invitationRow = created.rows[0];
+      }
+
+      const invitationUrl =
+        `${publicAppUrl()}/accept-invitation?token=${encodeURIComponent(rawToken)}`;
+
+      res.status(201).json({
+        ok: true,
+        invitation: normalize(invitationRow),
+        invitation_url: invitationUrl,
+        message: 'Invitation créée. Copiez ce lien et transmettez-le à l’utilisateur.',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+app.get('/api/invitations/:token', async (req, res, next) => {
+  try {
+    const hashedToken = tokenHash(req.params.token);
+
+    const result = await pool.query(
+      `SELECT *
+       FROM base44_records
+       WHERE entity='Invitation'
+         AND data->>'token_hash'=$1
+         AND data->>'status'='pending'
+       LIMIT 1`,
+      [hashedToken]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({
+        error: 'Invitation introuvable, expirée ou déjà utilisée',
+      });
+    }
+
+    const invitation = normalize(result.rows[0]);
+
+    if (
+      invitation.expires_at &&
+      new Date(invitation.expires_at).getTime() < Date.now()
+    ) {
+      return res.status(410).json({ error: 'Cette invitation a expiré' });
+    }
+
+    res.json({
+      id: invitation.id,
+      email: invitation.email,
+      role: invitation.role,
+      organisation_id: invitation.organisation_id,
+      status: invitation.status,
+      expires_at: invitation.expires_at,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/invitations/:token/accept', async (req, res, next) => {
+  const client = await pool.connect();
+
+  try {
+    const password = String(req.body?.password || '');
+    const firstName = String(req.body?.first_name || '').trim();
+    const lastName = String(req.body?.last_name || '').trim();
+
+    if (password.length < 8) {
+      return res.status(400).json({
+        error: 'Le mot de passe doit contenir au moins 8 caractères',
+      });
+    }
+
+    const hashedToken = tokenHash(req.params.token);
+    await client.query('BEGIN');
+
+    const invitationResult = await client.query(
+      `SELECT *
+       FROM base44_records
+       WHERE entity='Invitation'
+         AND data->>'token_hash'=$1
+         AND data->>'status'='pending'
+       LIMIT 1
+       FOR UPDATE`,
+      [hashedToken]
+    );
+
+    if (!invitationResult.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({
+        error: 'Invitation introuvable, expirée ou déjà utilisée',
+      });
+    }
+
+    const invitationRow = invitationResult.rows[0];
+    const invitation = normalize(invitationRow);
+
+    if (
+      invitation.expires_at &&
+      new Date(invitation.expires_at).getTime() < Date.now()
+    ) {
+      await client.query('ROLLBACK');
+      return res.status(410).json({ error: 'Cette invitation a expiré' });
+    }
+
+    const existingUser = await client.query(
+      'SELECT id FROM app_users WHERE lower(email)=lower($1) LIMIT 1',
+      [invitation.email]
+    );
+
+    if (existingUser.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'Un utilisateur existe déjà avec cette adresse email',
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const fullName =
+      [firstName, lastName].filter(Boolean).join(' ') || invitation.email;
+
+    const userResult = await client.query(
+      `INSERT INTO app_users(
+        email,password_hash,first_name,last_name,full_name,
+        role,status,organisation_id
+      )
+      VALUES($1,$2,$3,$4,$5,$6,'actif',$7)
+      RETURNING *`,
+      [
+        invitation.email,
+        passwordHash,
+        firstName,
+        lastName,
+        fullName,
+        invitation.role || 'agent',
+        invitation.organisation_id || null,
+      ]
+    );
+
+    const createdUser = userResult.rows[0];
+
+    const base44UserData = publicUser(createdUser);
+    await client.query(
+      `INSERT INTO base44_records(entity, data)
+       VALUES('User', $1::jsonb)`,
+      [JSON.stringify(base44UserData)]
+    );
+
+    await client.query(
+      `UPDATE base44_records
+       SET data=data || $1::jsonb, updated_date=now()
+       WHERE id=$2`,
+      [
+        JSON.stringify({
+          status: 'accepted',
+          statut: 'acceptee',
+          accepted_at: new Date().toISOString(),
+          accepted_user_id: createdUser.id,
+        }),
+        invitationRow.id,
+      ]
+    );
+
+    await client.query('COMMIT');
+
+    res.status(201).json({
+      ok: true,
+      user: publicUser(createdUser),
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+
+    if (error.code === '23505') {
+      return res.status(409).json({
+        error: 'Un utilisateur existe déjà avec cette adresse email',
+      });
+    }
+
+    next(error);
+  } finally {
+    client.release();
+  }
+});
+
+/* ------------------------- ENTITÉS ------------------------- */
 
 app.get('/api/entities/:entity', requireAuth, async (req, res, next) => {
   try {
     const { entity } = req.params;
     const filter = req.query.filter ? JSON.parse(req.query.filter) : {};
     const sort = req.query.sort || '';
-    const limit = req.query.limit ? Number(req.query.limit) : undefined;
-    const result = await pool.query('SELECT * FROM base44_records WHERE entity=$1', [entity]);
+    const limit = req.query.limit
+      ? Number(req.query.limit)
+      : undefined;
+
+    const result = await pool.query(
+      'SELECT * FROM base44_records WHERE entity=$1',
+      [entity]
+    );
+
     let rows = result.rows.map(normalize);
     rows = applyFilter(rows, filter);
     rows = applySort(rows, sort);
+
     if (limit) rows = rows.slice(0, limit);
     res.json(rows);
-  } catch (error) { next(error); }
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post('/api/entities/:entity', requireAuth, async (req, res, next) => {
   try {
     const { entity } = req.params;
     const body = { ...(req.body || {}) };
-    if (!body.created_by) body.created_by = req.user.email;
+
+    if (!body.created_by) {
+      body.created_by = req.user.email;
+    }
+
     const result = await pool.query(
-      'INSERT INTO base44_records(entity, data) VALUES($1, $2::jsonb) RETURNING *',
+      `INSERT INTO base44_records(entity, data)
+       VALUES($1, $2::jsonb)
+       RETURNING *`,
       [entity, JSON.stringify(body)]
     );
+
     res.status(201).json(normalize(result.rows[0]));
-  } catch (error) { next(error); }
+  } catch (error) {
+    next(error);
+  }
 });
 
-app.patch('/api/entities/:entity/:id', requireAuth, async (req, res, next) => {
-  try {
-    const { entity, id } = req.params;
-    const result = await pool.query(
-      'UPDATE base44_records SET data=data || $1::jsonb, updated_date=now() WHERE entity=$2 AND id=$3 RETURNING *',
-      [JSON.stringify(req.body || {}), entity, id]
-    );
-    if (!result.rows.length) return res.status(404).json({ error: 'Not found' });
-    res.json(normalize(result.rows[0]));
-  } catch (error) { next(error); }
-});
+app.patch(
+  '/api/entities/:entity/:id',
+  requireAuth,
+  async (req, res, next) => {
+    try {
+      const { entity, id } = req.params;
 
-app.delete('/api/entities/:entity/:id', requireAuth, async (req, res, next) => {
-  try {
-    const { entity, id } = req.params;
-    await pool.query('DELETE FROM base44_records WHERE entity=$1 AND id=$2', [entity, id]);
-    res.json({ ok: true });
-  } catch (error) { next(error); }
-});
+      const result = await pool.query(
+        `UPDATE base44_records
+         SET data=data || $1::jsonb, updated_date=now()
+         WHERE entity=$2 AND id=$3
+         RETURNING *`,
+        [JSON.stringify(req.body || {}), entity, id]
+      );
 
-app.post('/api/upload', requireAuth, upload.single('file'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'Fichier manquant' });
-  const baseUrl = process.env.PUBLIC_BASE_URL || `http://localhost:${PORT}`;
-  res.json({ file_url: `${baseUrl}/uploads/${req.file.filename}` });
-});
+      if (!result.rows.length) {
+        return res.status(404).json({ error: 'Not found' });
+      }
 
-app.post('/api/functions/:name', requireAuth, async (req, res, next) => {
-  try {
-    if (req.params.name === 'exportCollectePdf') {
-      const pdf = await createCollectePdf(req.body?.collecteId);
-      return res.json({ data: { success: true, file: pdf.toString('base64') } });
+      res.json(normalize(result.rows[0]));
+    } catch (error) {
+      next(error);
     }
-    res.json({ data: { success: true }, ok: true });
-  } catch (error) { next(error); }
-});
+  }
+);
 
-app.post('/api/users/invite', requireAuth, async (req, res, next) => {
-  try {
-    const { email, role = 'user' } = req.body || {};
-    if (!email) return res.status(400).json({ error: 'Email obligatoire' });
-    res.json({ ok: true, email, role, warning: 'Envoi email non configuré' });
-  } catch (error) { next(error); }
-});
+app.delete(
+  '/api/entities/:entity/:id',
+  requireAuth,
+  async (req, res, next) => {
+    try {
+      const { entity, id } = req.params;
+
+      await pool.query(
+        'DELETE FROM base44_records WHERE entity=$1 AND id=$2',
+        [entity, id]
+      );
+
+      res.json({ ok: true });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+app.post(
+  '/api/upload',
+  requireAuth,
+  upload.single('file'),
+  (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Fichier manquant' });
+    }
+
+    const baseUrl =
+      process.env.PUBLIC_BASE_URL ||
+      `http://localhost:${PORT}`;
+
+    res.json({
+      file_url: `${baseUrl}/uploads/${req.file.filename}`,
+    });
+  }
+);
+
+app.post(
+  '/api/functions/:name',
+  requireAuth,
+  async (req, res, next) => {
+    try {
+      if (req.params.name === 'exportCollectePdf') {
+        const pdf = await createCollectePdf(req.body?.collecteId);
+
+        return res.json({
+          data: {
+            success: true,
+            file: pdf.toString('base64'),
+          },
+        });
+      }
+
+      res.json({
+        data: { success: true },
+        ok: true,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/* ------------------------- FRONTEND ------------------------- */
 
 const distDir = path.join(__dirname, '..', 'dist');
+
 if (fs.existsSync(distDir)) {
   app.use(express.static(distDir));
-  app.get('*', (_req, res) => res.sendFile(path.join(distDir, 'index.html')));
+
+  app.get('*', (_req, res) => {
+    res.sendFile(path.join(distDir, 'index.html'));
+  });
 }
 
 app.use((error, _req, res, _next) => {
   console.error(error);
-  res.status(500).json({ error: error.message || 'Erreur interne' });
+  res.status(500).json({
+    error: error.message || 'Erreur interne',
+  });
 });
 
 await ensureAuthSchema();
