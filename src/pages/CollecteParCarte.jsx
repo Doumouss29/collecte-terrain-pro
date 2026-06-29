@@ -74,28 +74,43 @@ export default function CollecteParCarte() {
   // Sections sélectionnées avec leurs métadonnées complètes
   const selectedSections = allCadastreSections.filter((s) => selectedSectionIds.includes(s.id));
 
-  // Charger les collectes déjà faites pour marquer les parcelles
+  // Charger les collectes déjà faites pour marquer les parcelles.
+  // Important : le filtre serveur sur "commune" peut être sensible à la casse
+  // ou aux accents. On filtre donc d'abord par organisation, puis localement
+  // avec normalizeText afin que BEDIALA, Bédiala et bediala correspondent.
   const { data: collectesExistantes = [] } = useQuery({
     queryKey: ['collectes-carte', effectiveOrganisationId, selectedCommune],
     queryFn: async () => {
-      const all = [];
-      let page = 0;
-      const pageSize = 1000;
-      while (true) {
-        const batch = await base44.entities.Collecte.filter(
-          { organisation_id: effectiveOrganisationId, commune: selectedCommune },
-          '-created_date',
-          pageSize,
-          page * pageSize
-        );
-        all.push(...batch);
-        if (batch.length < pageSize) break;
-        page++;
-        if (page > 20) break;
-      }
-      return all;
+      const all = await base44.entities.Collecte.filter(
+        { organisation_id: effectiveOrganisationId },
+        '-created_date',
+        5000
+      );
+
+      const collectesCommune = all.filter(
+        (collecte) =>
+          normalizeText(collecte.commune) === normalizeText(selectedCommune)
+      );
+
+      console.group('Diagnostic collectes carte');
+      console.log('ORGANISATION ACTIVE :', effectiveOrganisationId);
+      console.log('COMMUNE ACTIVE :', selectedCommune);
+      console.log('TOTAL COLLECTES ORGANISATION :', all.length);
+      console.log('COLLECTES DE LA COMMUNE :', collectesCommune.length);
+      console.log(
+        'COLLECTES VALIDÉES :',
+        collectesCommune.filter(
+          (collecte) => normalizeText(collecte.statut) === 'VALIDEE'
+        )
+      );
+      console.groupEnd();
+
+      return collectesCommune;
     },
     enabled: !!effectiveOrganisationId && !!selectedCommune,
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
   });
 
   const { data: convocations = [] } = useQuery({
